@@ -121,6 +121,77 @@ func (l *Conn) Bind(username, password string) error {
 	return err
 }
 
+// SASLBind performs a SASL bind operation with the given mechanism and credentials
+func (l *Conn) SASLBind(mechanism string, credentials []byte) ([]byte, error) {
+	packet := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Request")
+	packet.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, l.nextMessageID(), "MessageID"))
+	bindRequest := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ApplicationBindRequest, nil, "Bind Request")
+	bindRequest.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 3, "Version"))
+	bindRequest.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "Name"))
+	saslCreds := ber.Encode(ber.ClassContext, ber.TypeConstructed, 3, nil, "SaslCredentials")
+	saslCreds.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, mechanism, "Mechanism"))
+	saslCreds.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, string(credentials), "Credentials"))
+	bindRequest.AppendChild(saslCreds)
+	packet.AppendChild(bindRequest)
+
+	if l.Debug {
+		ber.PrintPacket(packet)
+	}
+
+	msgCtx, err := l.sendMessage(packet)
+	if err != nil {
+		return nil, err
+	}
+	defer l.finishMessage(msgCtx)
+
+	packetResponse, ok := <-msgCtx.responses
+	if !ok {
+		return nil, NewError(ErrorNetwork, errors.New("ldap: response channel closed"))
+	}
+	packet, err = packetResponse.ReadPacket()
+	l.Debug.Printf("%d: got response %p", msgCtx.id, packet)
+	if err != nil {
+		return nil, err
+	}
+
+	if l.Debug {
+		if err := addLDAPDescriptions(packet); err != nil {
+			return nil, err
+		}
+		ber.PrintPacket(packet)
+	}
+
+	resultCode, resultToken, resultDescription := getSASLBindResultCode(packet)
+	if resultCode != 0 {
+		return nil, NewError(resultCode, errors.New(resultDescription))
+	}
+
+	return resultToken, nil
+}
+
+func getSASLBindResultCode(packet *ber.Packet) (code uint8, token []byte, description string) {
+	if packet == nil {
+		return ErrorUnexpectedResponse, nil, "Empty packet"
+	} else if len(packet.Children) >= 2 {
+		response := packet.Children[1]
+		if response == nil {
+			return ErrorUnexpectedResponse, nil, "Empty response in packet"
+		}
+		if response.ClassType == ber.ClassApplication && response.TagType == ber.TypeConstructed && len(response.Children) >= 3 {
+			// Children[1].Children[2] is the diagnosticMessage which is guaranteed to exist as seen here: https://tools.ietf.org/html/rfc4511#section-4.1.9
+			code = uint8(response.Children[0].Value.(int64))
+			description = response.Children[2].Value.(string)
+			if len(response.Children) >= 4 {
+				responseToken := response.Children[3]
+				token = responseToken.Data.Bytes()
+			}
+			return code, token, description
+		}
+	}
+
+	return ErrorNetwork, nil, "Invalid packet format"
+}
+
 // UnauthenticatedBind performs an unauthenticated bind.
 //
 // A username may be provided for trace (e.g. logging) purpose only, but it is normally not

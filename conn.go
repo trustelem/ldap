@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -77,7 +78,7 @@ const (
 
 // Conn represents an LDAP Connection
 type Conn struct {
-	conn                net.Conn
+	conn                bufferedConn
 	isTLS               bool
 	closing             uint32
 	closeErr            atomicValue
@@ -91,6 +92,18 @@ type Conn struct {
 	outstandingRequests uint
 	messageMutex        sync.Mutex
 	requestTimeout      int64
+	handlersMutex       sync.Mutex
+	wrHandler           func(*ber.Packet) ([]byte, error)
+	rdHandler           func(reader io.Reader) ([]*ber.Packet, error)
+}
+
+func defaultWriteHandler(p *ber.Packet) ([]byte, error) {
+	return p.Bytes(), nil
+}
+
+func defaultReadHandler(reader io.Reader) ([]*ber.Packet, error) {
+	p, err := ber.ReadPacket(reader)
+	return []*ber.Packet{p}, err
 }
 
 var _ Client = &Conn{}
@@ -136,7 +149,7 @@ func DialTLS(network, addr string, config *tls.Config) (*Conn, error) {
 // NewConn returns a new Conn using conn for network I/O.
 func NewConn(conn net.Conn, isTLS bool) *Conn {
 	return &Conn{
-		conn:            conn,
+		conn:            newBufferedConn(conn),
 		chanConfirm:     make(chan struct{}),
 		chanMessageID:   make(chan int64),
 		chanMessage:     make(chan *messagePacket, 10),
@@ -247,7 +260,7 @@ func (l *Conn) StartTLS(config *tls.Config) error {
 		}
 
 		l.isTLS = true
-		l.conn = conn
+		l.conn = newBufferedConn(conn)
 	} else {
 		return NewError(resultCode, fmt.Errorf("ldap: cannot StartTLS (%s)", message))
 	}
@@ -318,6 +331,43 @@ func (l *Conn) finishMessage(msgCtx *messageContext) {
 	l.sendProcessMessage(message)
 }
 
+func (l *Conn) writeHandler() func(*ber.Packet) ([]byte, error) {
+	l.handlersMutex.Lock()
+	defer l.handlersMutex.Unlock()
+	if l.wrHandler != nil {
+		return l.wrHandler
+	}
+	return defaultWriteHandler
+}
+
+func (l *Conn) readHandler() func(reader io.Reader) ([]*ber.Packet, error) {
+	l.handlersMutex.Lock()
+	defer l.handlersMutex.Unlock()
+	if l.rdHandler != nil {
+		return l.rdHandler
+	}
+	return defaultReadHandler
+}
+
+// SetReadHandler sets a handler to be used to read packets from a connection.
+// The primary usage is to handle packet reading after a successful SASL bind operation.
+// Setting the handler to nil will use the default read handler.
+func (l *Conn) SetReadHandler(rh func(reader io.Reader) ([]*ber.Packet, error)) {
+	l.handlersMutex.Lock()
+	defer l.handlersMutex.Unlock()
+	l.rdHandler = rh
+}
+
+// SetWriteHandler sets a handler to be used to convert a Packet into a []byte, just
+// before being written on the connection.
+// The primary usage is to handle packet writing after a successful SASL bind operation.
+// Setting the handler to nil will use the default handler.
+func (l *Conn) SetWriteHandler(wh func(*ber.Packet) ([]byte, error)) {
+	l.handlersMutex.Lock()
+	defer l.handlersMutex.Unlock()
+	l.wrHandler = wh
+}
+
 func (l *Conn) sendProcessMessage(message *messagePacket) bool {
 	l.messageMutex.Lock()
 	defer l.messageMutex.Unlock()
@@ -360,9 +410,13 @@ func (l *Conn) processMessages() {
 			case MessageRequest:
 				// Add to message list and write to network
 				l.Debug.Printf("Sending message %d", message.MessageID)
-
-				buf := message.Packet.Bytes()
-				_, err := l.conn.Write(buf)
+				writefn := l.writeHandler()
+				buf, err := writefn(message.Packet)
+				if err != nil {
+					l.Debug.Printf("Fatal error serializing packet: %s", err.Error())
+					return
+				}
+				_, err = l.conn.Write(buf)
 				if err != nil {
 					l.Debug.Printf("Error Sending Message: %s", err.Error())
 					message.Context.sendResponse(&PacketResponse{Error: fmt.Errorf("unable to send request: %s", err)})
@@ -435,7 +489,15 @@ func (l *Conn) reader() {
 			l.Debug.Printf("reader clean stopping (without closing the connection)")
 			return
 		}
-		packet, err := ber.ReadPacket(l.conn)
+		// Use peek to block until some data is available, this allows us to use a custom read handler
+		// when a SASL layer is enabled
+		var err error
+		var packets []*ber.Packet
+		_, err = l.conn.Peek(1)
+		if err == nil {
+			readfn := l.readHandler()
+			packets, err = readfn(l.conn)
+		}
 		if err != nil {
 			// A read error is expected here if we are closing the connection...
 			if !l.isClosing() {
@@ -444,23 +506,25 @@ func (l *Conn) reader() {
 			}
 			return
 		}
-		addLDAPDescriptions(packet)
-		if len(packet.Children) == 0 {
-			l.Debug.Printf("Received bad ldap packet")
-			continue
-		}
-		l.messageMutex.Lock()
-		if l.isStartingTLS {
-			cleanstop = true
-		}
-		l.messageMutex.Unlock()
-		message := &messagePacket{
-			Op:        MessageResponse,
-			MessageID: packet.Children[0].Value.(int64),
-			Packet:    packet,
-		}
-		if !l.sendProcessMessage(message) {
-			return
+		for _, packet := range packets {
+			addLDAPDescriptions(packet)
+			if len(packet.Children) == 0 {
+				l.Debug.Printf("Received bad ldap packet")
+				continue
+			}
+			l.messageMutex.Lock()
+			if l.isStartingTLS {
+				cleanstop = true
+			}
+			l.messageMutex.Unlock()
+			message := &messagePacket{
+				Op:        MessageResponse,
+				MessageID: packet.Children[0].Value.(int64),
+				Packet:    packet,
+			}
+			if !l.sendProcessMessage(message) {
+				return
+			}
 		}
 	}
 }
