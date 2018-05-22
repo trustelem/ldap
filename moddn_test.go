@@ -3,7 +3,7 @@ package ldap_test
 import (
 	"log"
 
-	"gopkg.in/ldap.v2"
+	"github.com/trustelem/ldap"
 )
 
 // ExampleConn_ModifyDN_renameNoMove shows how to rename an entry without moving it

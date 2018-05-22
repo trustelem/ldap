@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"gopkg.in/ldap.v2"
+	"github.com/trustelem/ldap"
 )
 
 func TestSuccessfulDNParsing(t *testing.T) {
