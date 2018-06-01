@@ -106,7 +106,10 @@ func NewEntry(dn string, attributes map[string][]string) *Entry {
 
 	var encodedAttributes []*EntryAttribute
 	for _, attributeName := range attributeNames {
-		encodedAttributes = append(encodedAttributes, NewEntryAttribute(attributeName, attributes[attributeName]))
+		encodedAttributes = append(encodedAttributes, &EntryAttribute{
+			Name: attributeName,
+			S:    attributes[attributeName],
+		})
 	}
 	return &Entry{
 		DN:         dn,
@@ -122,40 +125,31 @@ type Entry struct {
 	Attributes []*EntryAttribute
 }
 
-// GetAttributeValues returns the values for the named attribute, or an empty list
+// GetAttribute returns the EntryAttribute for the named attribute, or nil
+func (e *Entry) GetAttribute(attribute string) *EntryAttribute {
+	for _, attr := range e.Attributes {
+		if attr.Name == attribute {
+			return attr
+		}
+	}
+	return nil
+}
+
+// GetAttributeValues returns the string values for the named attribute, or an empty list
 func (e *Entry) GetAttributeValues(attribute string) []string {
 	for _, attr := range e.Attributes {
 		if attr.Name == attribute {
-			return attr.Values
+			return attr.S
 		}
 	}
 	return []string{}
 }
 
-// GetRawAttributeValues returns the byte values for the named attribute, or an empty list
-func (e *Entry) GetRawAttributeValues(attribute string) [][]byte {
-	for _, attr := range e.Attributes {
-		if attr.Name == attribute {
-			return attr.ByteValues
-		}
-	}
-	return [][]byte{}
-}
-
-// GetAttributeValue returns the first value for the named attribute, or ""
+// GetAttributeValue returns the first string value for the named attribute, or ""
 func (e *Entry) GetAttributeValue(attribute string) string {
 	values := e.GetAttributeValues(attribute)
 	if len(values) == 0 {
 		return ""
-	}
-	return values[0]
-}
-
-// GetRawAttributeValue returns the first value for the named attribute, or an empty slice
-func (e *Entry) GetRawAttributeValue(attribute string) []byte {
-	values := e.GetRawAttributeValues(attribute)
-	if len(values) == 0 {
-		return []byte{}
 	}
 	return values[0]
 }
@@ -176,37 +170,39 @@ func (e *Entry) PrettyPrint(indent int) {
 	}
 }
 
-// NewEntryAttribute returns a new EntryAttribute with the desired key-value pair
-func NewEntryAttribute(name string, values []string) *EntryAttribute {
-	var bytes [][]byte
-	for _, value := range values {
-		bytes = append(bytes, []byte(value))
-	}
-	return &EntryAttribute{
-		Name:       name,
-		Values:     values,
-		ByteValues: bytes,
-	}
-}
-
 // EntryAttribute holds a single attribute
 type EntryAttribute struct {
 	// Name is the name of the attribute
 	Name string
-	// Values contain the string values of the attribute
-	Values []string
-	// ByteValues contain the raw values of the attribute
-	ByteValues [][]byte
+	// S => String (value)
+	S []string
+	// B => Boolean (value)
+	B []bool
+	// I => Integer (value)
+	I []int64
+	// O => Octet String (raw value, not encoded)
+	O []string
+}
+
+// StrValue returns the first string value of an attribute
+func (e *EntryAttribute) StrValue() string {
+	if e == nil {
+		return ""
+	}
+	if len(e.S) > 0 {
+		return (e.S[0])
+	}
+	return ""
 }
 
 // Print outputs a human-readable description
 func (e *EntryAttribute) Print() {
-	fmt.Printf("%s: %s\n", e.Name, e.Values)
+	fmt.Printf("%s: %s\n", e.Name, e.S)
 }
 
 // PrettyPrint outputs a human-readable description with indenting
 func (e *EntryAttribute) PrettyPrint(indent int) {
-	fmt.Printf("%s%s: %s\n", strings.Repeat(" ", indent), e.Name, e.Values)
+	fmt.Printf("%s%s: %s\n", strings.Repeat(" ", indent), e.Name, e.S)
 }
 
 // SearchResult holds the server's response to a search request
@@ -420,8 +416,20 @@ func (l *Conn) Search(searchRequest *SearchRequest) (*SearchResult, error) {
 				attr := new(EntryAttribute)
 				attr.Name = child.Children[0].Value.(string)
 				for _, value := range child.Children[1].Children {
-					attr.Values = append(attr.Values, value.Value.(string))
-					attr.ByteValues = append(attr.ByteValues, value.ByteValue)
+					if value.Value == nil {
+						attr.O = append(attr.O, string(value.ByteValue))
+					} else {
+						switch v := value.Value.(type) {
+						case bool:
+							attr.B = append(attr.B, v)
+						case int64:
+							attr.I = append(attr.I, v)
+						case string:
+							attr.S = append(attr.S, v)
+						default:
+							attr.O = append(attr.O, string(value.ByteValue))
+						}
+					}
 				}
 				entry.Attributes = append(entry.Attributes, attr)
 			}
