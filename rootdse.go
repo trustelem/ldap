@@ -12,6 +12,7 @@ const (
 	RootDSEldapServiceName         = "ldapServiceName"
 	RootDSEhighestCommittedUSN     = "highestCommittedUSN"
 	RootDSEsubschemaSubentry       = "subschemaSubentry"
+	RootDSEschemaNamingContext     = "schemaNamingContext"
 )
 
 // RootDSE allows to retrieve the RootDSE entry, returning the provided attributes
@@ -21,7 +22,7 @@ func (conn *Conn) RootDSE(fields ...string) (*Entry, error) {
 	}
 	// scan root DSE
 	search := NewSearchRequest(
-		"", // BaseDN
+		"",
 		ScopeBaseObject, NeverDerefAliases, 0, 0, false,
 		"(objectclass=*)",
 		fields,
