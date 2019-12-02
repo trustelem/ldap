@@ -1,12 +1,11 @@
 package ldap
 
 import (
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 
-	"gopkg.in/asn1-ber.v1"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 // LDAP Application Codes
@@ -87,7 +86,7 @@ var BeheraPasswordPolicyErrorMap = map[int8]string{
 func addLDAPDescriptions(packet *ber.Packet) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = NewError(ErrorDebugging, errors.New("ldap: cannot process packet to add descriptions"))
+			err = NewError(ErrorDebugging, fmt.Errorf("ldap: cannot process packet to add descriptions: %s", r))
 		}
 	}()
 	packet.Description = "LDAP Response"
@@ -270,9 +269,12 @@ func addRequestDescriptions(packet *ber.Packet) error {
 }
 
 func addDefaultLDAPResponseDescriptions(packet *ber.Packet) error {
-	resultCode, _ := getLDAPResultCode(packet)
-	packet.Children[1].Children[0].Description = "Result Code (" + LDAPResultCodeMap[resultCode] + ")"
-	packet.Children[1].Children[1].Description = "Matched DN"
+	err := GetLDAPError(packet)
+	if err == nil {
+		return nil
+	}
+	packet.Children[1].Children[0].Description = "Result Code (" + LDAPResultCodeMap[err.(*Error).ResultCode] + ")"
+	packet.Children[1].Children[1].Description = "Matched DN (" + err.(*Error).MatchedDN + ")"
 	packet.Children[1].Children[2].Description = "Error Message"
 	if len(packet.Children[1].Children) > 3 {
 		packet.Children[1].Children[3].Description = "Referral"

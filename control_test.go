@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"gopkg.in/asn1-ber.v1"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 func TestControlPaging(t *testing.T) {
@@ -18,6 +18,14 @@ func TestControlPaging(t *testing.T) {
 func TestControlManageDsaIT(t *testing.T) {
 	runControlTest(t, NewControlManageDsaIT(true))
 	runControlTest(t, NewControlManageDsaIT(false))
+}
+
+func TestControlMicrosoftNotification(t *testing.T) {
+	runControlTest(t, NewControlMicrosoftNotification())
+}
+
+func TestControlMicrosoftShowDeleted(t *testing.T) {
+	runControlTest(t, NewControlMicrosoftShowDeleted())
 }
 
 func TestControlString(t *testing.T) {
@@ -77,11 +85,19 @@ func TestDescribeControlPaging(t *testing.T) {
 	runAddControlDescriptions(t, NewControlPaging(0), "Control Type (Paging)", "Control Value (Paging)")
 }
 
+func TestDescribeControlMicrosoftNotification(t *testing.T) {
+	runAddControlDescriptions(t, NewControlMicrosoftNotification(), "Control Type (Change Notification - Microsoft)")
+}
+
+func TestDescribeControlMicrosoftShowDeleted(t *testing.T) {
+	runAddControlDescriptions(t, NewControlMicrosoftShowDeleted(), "Control Type (Show Deleted Objects - Microsoft)")
+}
+
 func TestDescribeControlString(t *testing.T) {
 	runAddControlDescriptions(t, NewControlString("x", true, "y"), "Control Type ()", "Criticality", "Control Value")
-	runAddControlDescriptions(t, NewControlString("x", true, ""), "Control Type ()", "Criticality", "Control Value")
+	runAddControlDescriptions(t, NewControlString("x", true, ""), "Control Type ()", "Criticality")
 	runAddControlDescriptions(t, NewControlString("x", false, "y"), "Control Type ()", "Control Value")
-	runAddControlDescriptions(t, NewControlString("x", false, ""), "Control Type ()", "Control Value")
+	runAddControlDescriptions(t, NewControlString("x", false, ""), "Control Type ()")
 }
 
 func runAddControlDescriptions(t *testing.T, originalControl Control, childDescriptions ...string) {
