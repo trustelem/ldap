@@ -146,7 +146,7 @@ func (l *Conn) SASLBind(mechanism string, credentials []byte) ([]byte, error) {
 	return resultToken, nil
 }
 
-func getSASLBindResultCode(packet *ber.Packet) (code uint8, token []byte, description string) {
+func getSASLBindResultCode(packet *ber.Packet) (code uint16, token []byte, description string) {
 	if packet == nil {
 		return ErrorUnexpectedResponse, nil, "Empty packet"
 	} else if len(packet.Children) >= 2 {
@@ -156,7 +156,7 @@ func getSASLBindResultCode(packet *ber.Packet) (code uint8, token []byte, descri
 		}
 		if response.ClassType == ber.ClassApplication && response.TagType == ber.TypeConstructed && len(response.Children) >= 3 {
 			// Children[1].Children[2] is the diagnosticMessage which is guaranteed to exist as seen here: https://tools.ietf.org/html/rfc4511#section-4.1.9
-			code = uint8(response.Children[0].Value.(int64))
+			code = uint16(response.Children[0].Value.(int64))
 			description = response.Children[2].Value.(string)
 			if len(response.Children) >= 4 {
 				responseToken := response.Children[3]
