@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/go-asn1-ber/asn1-ber"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 const (
@@ -23,6 +23,8 @@ const (
 	ControlTypeMicrosoftNotification = "1.2.840.113556.1.4.528"
 	// ControlTypeMicrosoftShowDeleted - https://msdn.microsoft.com/en-us/library/aa366989(v=vs.85).aspx
 	ControlTypeMicrosoftShowDeleted = "1.2.840.113556.1.4.417"
+	// ControlTypeMicrosoftDirSync - https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/2213a7f2-0a36-483c-b2a4-8574d53aa1e3
+	ControlTypeMicrosoftDirSync = "1.2.840.113556.1.4.841"
 )
 
 // ControlTypeMap maps controls to text descriptions
@@ -32,6 +34,7 @@ var ControlTypeMap = map[string]string{
 	ControlTypeManageDsaIT:           "Manage DSA IT",
 	ControlTypeMicrosoftNotification: "Change Notification - Microsoft",
 	ControlTypeMicrosoftShowDeleted:  "Show Deleted Objects - Microsoft",
+	ControlTypeMicrosoftDirSync:      "DirSync - Microsoft",
 }
 
 // Control defines an interface controls provide to encode and describe themselves
@@ -305,6 +308,120 @@ func NewControlMicrosoftShowDeleted() *ControlMicrosoftShowDeleted {
 	return &ControlMicrosoftShowDeleted{}
 }
 
+// Values for ControlMicrosoftDirSync Flag field
+const (
+	DirSyncFlagNone              = 0
+	DirSyncFlagObjectSecurity    = 0x1
+	DirSyncFlagParentsFirst      = 0x0800
+	DirSyncFlagPublicDataOnly    = 0x2000
+	DirSyncFlagIncrementalValues = 0x80000000
+)
+
+// ControlMicrosoftDirSync implements the DirSync control described in https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/2213a7f2-0a36-483c-b2a4-8574d53aa1e3
+type ControlMicrosoftDirSync struct {
+	// Flags contains optional flags
+	Flags uint32
+	// MaxBytes specifies the maximum number of bytes to return in the reply message
+	MaxBytes uint32
+	// Cookie is an opaque value returned by the server to track state
+	Cookie []byte
+}
+
+// GetControlType returns the OID
+func (c *ControlMicrosoftDirSync) GetControlType() string {
+	return ControlTypeMicrosoftDirSync
+}
+
+// Encode returns the ber packet representation
+func (c *ControlMicrosoftDirSync) Encode() *ber.Packet {
+	packet := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Control")
+	packet.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, ControlTypeMicrosoftDirSync, "Control Type (ControlTypeDirSync)"))
+
+	packet.AppendChild(ber.NewBoolean(ber.ClassUniversal, ber.TypePrimitive, ber.TagBoolean, true, "Criticality"))
+
+	p2 := ber.Encode(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, nil, "Control Value (ControlMicrosoftDirSync)")
+	seq := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "ControlMicrosoftDirSync Control Value")
+	seq.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, int64(c.Flags), "Flags"))
+	seq.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, int64(c.MaxBytes), "MaxBytes"))
+	cookie := ber.Encode(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, nil, "Cookie")
+	cookie.Value = c.Cookie
+	cookie.Data.Write(c.Cookie)
+	seq.AppendChild(cookie)
+	p2.AppendChild(seq)
+
+	packet.AppendChild(p2)
+	return packet
+}
+
+// String returns a human-readable description
+func (c *ControlMicrosoftDirSync) String() string {
+	return fmt.Sprintf(
+		"Control Type: %s (%q)  Criticality: %t  Flags: %d  Cookie: %q",
+		ControlTypeMap[ControlTypePaging],
+		ControlTypePaging,
+		false,
+		c.Flags,
+		c.Cookie)
+}
+
+// SetCookie stores the given cookie in the paging control
+func (c *ControlMicrosoftDirSync) SetCookie(cookie []byte) {
+	c.Cookie = cookie
+}
+
+// NewControlMicrosoftDirSync returns a ControlMicrosoftDirSync control
+func NewControlMicrosoftDirSync() *ControlMicrosoftDirSync {
+	return &ControlMicrosoftDirSync{}
+}
+
+// ControlMicrosoftDirSyncResponse implements the DirSync control response described in https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/2213a7f2-0a36-483c-b2a4-8574d53aa1e3
+type ControlMicrosoftDirSyncResponse struct {
+	// MoreResults is nonzero if there are more changes to retrieve
+	MoreResults uint32
+	// Unused is unused
+	Unused uint32
+	// Cookie is an opaque value returned by the server to track state
+	Cookie []byte
+}
+
+// GetControlType returns the OID
+func (c *ControlMicrosoftDirSyncResponse) GetControlType() string {
+	return ControlTypeMicrosoftDirSync
+}
+
+// Encode returns the ber packet representation
+func (c *ControlMicrosoftDirSyncResponse) Encode() *ber.Packet {
+	packet := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Control")
+	packet.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, ControlTypeMicrosoftDirSync, "Control Type (ControlTypeDirSync)"))
+
+	packet.AppendChild(ber.NewBoolean(ber.ClassUniversal, ber.TypePrimitive, ber.TagBoolean, true, "Criticality"))
+
+	p2 := ber.Encode(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, nil, "Control Value (ControlMicrosoftDirSyncResponse)")
+	seq := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "ControlMicrosoftDirSyncResponse Control Value")
+	seq.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, int64(c.MoreResults), "MoreResults"))
+	seq.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, int64(c.Unused), "Unused"))
+	cookie := ber.Encode(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, nil, "Cookie")
+	cookie.Value = c.Cookie
+	cookie.Data.Write(c.Cookie)
+	seq.AppendChild(cookie)
+	p2.AppendChild(seq)
+	packet.AppendChild(p2)
+
+	return packet
+}
+
+// String returns a human-readable description
+func (c *ControlMicrosoftDirSyncResponse) String() string {
+	return fmt.Sprintf(
+		"Control Type: %s (%q)  Criticality: %t  Data: %d  Count: %d Cookie: %q",
+		ControlTypeMap[ControlTypeMicrosoftDirSync],
+		ControlTypeMicrosoftDirSync,
+		false,
+		c.MoreResults,
+		c.Unused,
+		c.Cookie)
+}
+
 // FindControl returns the first control of the given type in the list, or nil
 func FindControl(controls []Control, controlType string) Control {
 	for _, c := range controls {
@@ -456,6 +573,29 @@ func DecodeControl(packet *ber.Packet) (Control, error) {
 		return NewControlMicrosoftNotification(), nil
 	case ControlTypeMicrosoftShowDeleted:
 		return NewControlMicrosoftShowDeleted(), nil
+	case ControlTypeMicrosoftDirSync:
+		value.Description += " (DirSync response)"
+		c := new(ControlMicrosoftDirSyncResponse)
+		if value.Value != nil {
+			valueChildren, err := ber.DecodePacketErr(value.Data.Bytes())
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode data bytes: %s", err)
+			}
+			value.Data.Truncate(0)
+			value.Value = nil
+			value.AppendChild(valueChildren)
+		}
+		value = value.Children[0]
+		value.Description = "DirSync Control Value"
+		value.Children[0].Description = "MoreResults"
+		value.Children[1].Description = "Unused"
+		value.Children[2].Description = "Cookie"
+		c.MoreResults = uint32(value.Children[0].Value.(int64))
+		c.Unused = uint32(value.Children[1].Value.(int64))
+		c.Cookie = value.Children[2].Data.Bytes()
+		value.Children[1].Value = c.Cookie
+
+		return c, nil
 	default:
 		c := new(ControlString)
 		c.ControlType = ControlType

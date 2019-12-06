@@ -13,6 +13,7 @@ const (
 	RootDSEhighestCommittedUSN     = "highestCommittedUSN"
 	RootDSEsubschemaSubentry       = "subschemaSubentry"
 	RootDSEschemaNamingContext     = "schemaNamingContext"
+	RootDSEsupportedControl        = "supportedControl"
 )
 
 // RootDSE allows to retrieve the RootDSE entry, returning the provided attributes
